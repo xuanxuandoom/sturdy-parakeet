@@ -164,6 +164,61 @@ jobs:
           Write-Host "WEZTERM_CONFIG_FILE: $env:WEZTERM_CONFIG_FILE"
 
           Get-Content $configPath
+
+      - name: Install OpenCode and Codex
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=== Node.js / npm ==="
+          node --version
+          npm --version
+
+          Write-Host "`n=== Installing OpenCode ==="
+          npm install -g @opencode/cli
+
+          Write-Host "`n=== Verifying OpenCode ==="
+          $opencode = Get-Command opencode.exe -ErrorAction SilentlyContinue
+
+          if (-not $opencode) {
+              $opencode = Get-Command opencode -ErrorAction SilentlyContinue
+          }
+
+          if (-not $opencode) {
+              throw "OpenCode installation failed: opencode command not found."
+          }
+
+          Write-Host "OpenCode: $($opencode.Source)"
+          & $opencode.Source --version
+
+          Write-Host "`n=== Installing Codex CLI ==="
+
+          # Use OpenAI's official Windows installer.
+          powershell -ExecutionPolicy Bypass -Command `
+            "irm https://chatgpt.com/codex/install.ps1 | iex"
+
+          # Refresh PATH after the installer.
+          $env:Path = `
+            [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+            [Environment]::GetEnvironmentVariable("Path", "User")
+
+          Write-Host "`n=== Verifying Codex ==="
+
+          $codex = Get-Command codex.exe -ErrorAction SilentlyContinue
+
+          if (-not $codex) {
+              $codex = Get-Command codex -ErrorAction SilentlyContinue
+          }
+
+          if (-not $codex) {
+              throw "Codex installation failed: codex command not found."
+          }
+
+          Write-Host "Codex: $($codex.Source)"
+          & $codex.Source --version
+
+          Write-Host "`n=== AI CLI installation complete ==="
+
           
       - name: Configure Git Identity
         shell: powershell
