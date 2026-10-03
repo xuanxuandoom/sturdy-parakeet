@@ -277,7 +277,7 @@ jobs:
           Write-Host "`n=== Codex version ==="
           & $codexCommand.Source --version
           
-      - name: Configure Git For All User Profiles
+      - name: Configure Git Identity
         shell: powershell
         env:
           GIT_NAME: ${{ secrets.GIT_NAME }}
@@ -285,49 +285,75 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $gitName = $env:GIT_NAME
-          $gitEmail = $env:GIT_EMAIL
-
-          Write-Host "Git name: $gitName"
-          Write-Host "Git email: $gitEmail"
-
-          $profiles = Get-ChildItem "C:\Users" -Directory -Force | Where-Object {
-              $_.Name -notin @(
-                  "Public",
-                  "Default",
-                  "Default User",
-                  "All Users"
-              )
+          if ([string]::IsNullOrWhiteSpace($env:GIT_NAME)) {
+              throw "GIT_NAME GitHub Secret is empty or unavailable."
           }
 
-          foreach ($profile in $profiles) {
-              Write-Host "`nConfiguring Git for: $($profile.FullName)"
-
-              $gitConfig = Join-Path $profile.FullName ".gitconfig"
-
-              @(
-                  "[user]"
-                  "    name = $gitName"
-                  "    email = $gitEmail"
-              ) | Set-Content -Path $gitConfig -Encoding UTF8
-
-              Write-Host "Created: $gitConfig"
+          if ([string]::IsNullOrWhiteSpace($env:GIT_EMAIL)) {
+              throw "GIT_EMAIL GitHub Secret is empty or unavailable."
           }
 
-          # Configure the current runner account as well.
-          git config --global user.name "$gitName"
-          git config --global user.email "$gitEmail"
+          # ============================================================
+          # Actual RDP user's Windows profile
+          # ============================================================
+          $rdpProfile = "C:\Users\RDP.runnervmdlhio"
+          $gitConfig = Join-Path $rdpProfile ".gitconfig"
 
-          Write-Host "`n=== Git profile configurations ==="
+          Write-Host "RDP profile: $rdpProfile"
+          Write-Host "Git config:  $gitConfig"
 
-          Get-ChildItem "C:\Users" -Directory -Force |
-              ForEach-Object {
-                  $gitConfig = Join-Path $_.FullName ".gitconfig"
+          # Make sure the profile directory exists
+          if (-not (Test-Path $rdpProfile)) {
+              New-Item -ItemType Directory -Path $rdpProfile -Force | Out-Null
+          }
 
-                  if (Test-Path $gitConfig) {
-                      Write-Host "FOUND: $gitConfig"
-                  }
-              }
+          # ============================================================
+          # Create Git config DIRECTLY in the RDP user's profile
+          # ============================================================
+          git config --file "$gitConfig" user.name "$env:GIT_NAME"
+          git config --file "$gitConfig" user.email "$env:GIT_EMAIL"
+
+          # ============================================================
+          # Also configure the account running this GitHub Action
+          # ============================================================
+          git config --global user.name "$env:GIT_NAME"
+          git config --global user.email "$env:GIT_EMAIL"
+
+          # ============================================================
+          # Tell Git to use the RDP user's HOME
+          # ============================================================
+          $env:HOME = $rdpProfile
+          $env:USERPROFILE = $rdpProfile
+
+          Add-Content -Path $env:GITHUB_ENV -Value "HOME=$rdpProfile"
+          Add-Content -Path $env:GITHUB_ENV -Value "USERPROFILE=$rdpProfile"
+
+          # ============================================================
+          # Verify
+          # ============================================================
+          Write-Host ""
+          Write-Host "=== RDP .gitconfig ==="
+
+          if (Test-Path $gitConfig) {
+              Get-Content $gitConfig
+          }
+          else {
+              throw "Failed to create $gitConfig"
+          }
+
+          Write-Host ""
+          Write-Host "=== Git identity ==="
+
+          git config --file "$gitConfig" user.name
+          git config --file "$gitConfig" user.email
+
+          Write-Host ""
+          Write-Host "=== Git config location ==="
+
+          git config --file "$gitConfig" --list --show-origin
+
+          Write-Host ""
+          Write-Host "Git identity configured successfully."
 
       - name: Verify RDP Accessibility
         run: |
