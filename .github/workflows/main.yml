@@ -189,6 +189,20 @@ jobs:
           Write-Host "Version: $($package.Version)"
 
           Remove-Item $temp -Recurse -Force
+
+      - name: Check Windows Terminal provisioning
+        shell: powershell
+        run: |
+          Write-Host "=== Installed for users ==="
+          Get-AppxPackage -AllUsers -Name Microsoft.WindowsTerminal |
+            Select-Object Name, Version, PackageFullName, PackageUserInformation
+
+          Write-Host "`n=== Provisioned for new users ==="
+          Get-AppxProvisionedPackage -Online |
+            Where-Object {
+              $_.DisplayName -like "*WindowsTerminal*"
+            } |
+            Select-Object DisplayName, Version, PackageName
           
       - name: Configure Git Identity
         shell: powershell
