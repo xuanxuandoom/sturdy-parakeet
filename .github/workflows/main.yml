@@ -108,26 +108,78 @@ jobs:
 
           Write-Host "`n=== Environment ready ==="
 
-      - name: Install Windows Terminal
+      - name: Install WezTerm
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          choco install microsoft-windows-terminal -y --no-progress
+          choco install wezterm -y --no-progress
 
-      - name: Check Windows Terminal provisioning
+          # Refresh PATH
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                      [System.Environment]::GetEnvironmentVariable("Path", "User")
+
+          $wezterm = Get-Command wezterm.exe -ErrorAction SilentlyContinue
+
+          if (-not $wezterm) {
+              throw "WezTerm installation failed."
+          }
+
+          Write-Host "WezTerm installed:"
+          & $wezterm.Source --version
+
+      - name: Add WezTerm Explorer Context Menu
         shell: powershell
         run: |
-          Write-Host "=== Installed for users ==="
-          Get-AppxPackage -AllUsers -Name Microsoft.WindowsTerminal |
-            Select-Object Name, Version, PackageFullName, PackageUserInformation
+          $ErrorActionPreference = "Stop"
 
-          Write-Host "`n=== Provisioned for new users ==="
-          Get-AppxProvisionedPackage -Online |
-            Where-Object {
-              $_.DisplayName -like "*WindowsTerminal*"
-            } |
-            Select-Object DisplayName, Version, PackageName
+          $wezterm = (Get-Command wezterm-gui.exe -ErrorAction SilentlyContinue).Source
+
+          if (-not $wezterm) {
+              $wezterm = "C:\Program Files\WezTerm\wezterm-gui.exe"
+          }
+
+          if (-not (Test-Path $wezterm)) {
+              throw "Could not find wezterm-gui.exe"
+          }
+
+          Write-Host "WezTerm: $wezterm"
+
+          # Right-click a folder itself
+          $folderKey = "HKLM:\SOFTWARE\Classes\Directory\shell\WezTerm"
+
+          New-Item -Path $folderKey -Force | Out-Null
+          Set-ItemProperty -Path $folderKey `
+            -Name "(Default)" `
+            -Value "Open in WezTerm"
+
+          Set-ItemProperty -Path $folderKey `
+            -Name "Icon" `
+            -Value "`"$wezterm`""
+
+          New-Item -Path "$folderKey\command" -Force | Out-Null
+          Set-ItemProperty -Path "$folderKey\command" `
+            -Name "(Default)" `
+            -Value "`"$wezterm`" start --cwd `"%V`""
+
+          # Right-click the background inside a folder
+          $backgroundKey = "HKLM:\SOFTWARE\Classes\Directory\Background\shell\WezTerm"
+
+          New-Item -Path $backgroundKey -Force | Out-Null
+          Set-ItemProperty -Path $backgroundKey `
+            -Name "(Default)" `
+            -Value "Open WezTerm Here"
+
+          Set-ItemProperty -Path $backgroundKey `
+            -Name "Icon" `
+            -Value "`"$wezterm`""
+
+          New-Item -Path "$backgroundKey\command" -Force | Out-Null
+          Set-ItemProperty -Path "$backgroundKey\command" `
+            -Name "(Default)" `
+            -Value "`"$wezterm`" start --cwd `"%V`""
+
+          Write-Host "WezTerm Explorer context menu installed."
           
       - name: Configure Git Identity
         shell: powershell
