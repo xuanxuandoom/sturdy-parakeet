@@ -243,84 +243,6 @@ jobs:
 
           Write-Host "`n=== Codex version ==="
           & $codexCommand.Source --version
-          
-      - name: Configure Git Identity
-        shell: powershell
-        env:
-          GIT_NAME: ${{ secrets.GIT_NAME }}
-          GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          if ([string]::IsNullOrWhiteSpace($env:GIT_NAME)) {
-              throw "GIT_NAME GitHub Secret is empty or unavailable."
-          }
-
-          if ([string]::IsNullOrWhiteSpace($env:GIT_EMAIL)) {
-              throw "GIT_EMAIL GitHub Secret is empty or unavailable."
-          }
-
-          # ============================================================
-          # Actual RDP user's Windows profile
-          # ============================================================
-          $rdpProfile = "C:\Users\RDP.runnervmdlhio"
-          $gitConfig = Join-Path $rdpProfile ".gitconfig"
-
-          Write-Host "RDP profile: $rdpProfile"
-          Write-Host "Git config:  $gitConfig"
-
-          # Make sure the profile directory exists
-          if (-not (Test-Path $rdpProfile)) {
-              New-Item -ItemType Directory -Path $rdpProfile -Force | Out-Null
-          }
-
-          # ============================================================
-          # Create Git config DIRECTLY in the RDP user's profile
-          # ============================================================
-          git config --file "$gitConfig" user.name "$env:GIT_NAME"
-          git config --file "$gitConfig" user.email "$env:GIT_EMAIL"
-
-          # ============================================================
-          # Also configure the account running this GitHub Action
-          # ============================================================
-          git config --global user.name "$env:GIT_NAME"
-          git config --global user.email "$env:GIT_EMAIL"
-
-          # ============================================================
-          # Tell Git to use the RDP user's HOME
-          # ============================================================
-          $env:HOME = $rdpProfile
-          $env:USERPROFILE = $rdpProfile
-
-          Add-Content -Path $env:GITHUB_ENV -Value "HOME=$rdpProfile"
-          Add-Content -Path $env:GITHUB_ENV -Value "USERPROFILE=$rdpProfile"
-
-          # ============================================================
-          # Verify
-          # ============================================================
-          Write-Host ""
-          Write-Host "=== RDP .gitconfig ==="
-
-          if (Test-Path $gitConfig) {
-              Get-Content $gitConfig
-          }
-          else {
-              throw "Failed to create $gitConfig"
-          }
-
-          Write-Host ""
-          Write-Host "=== Git identity ==="
-
-          git config --file "$gitConfig" user.name
-          git config --file "$gitConfig" user.email
-
-          Write-Host ""
-          Write-Host "=== Git config location ==="
-
-          git config --file "$gitConfig" --list --show-origin
-
-          Write-Host ""
-          Write-Host "Git identity configured successfully."
 
       - name: Verify RDP Accessibility
         run: |
@@ -336,13 +258,133 @@ jobs:
 
       - name: Maintain Connection + Watch RDP User
         shell: powershell
+        env:
+          GIT_NAME: ${{ secrets.GIT_NAME }}
+          GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
         run: |
+          $ErrorActionPreference = "Stop"
+
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
           Write-Host "Credentials: $env:RDP_CREDS"
           Write-Host "==================`n"
 
-          $rdpProfile = "C:\Users\RDP"
+          # ============================================================
+          # FIND THE ACTUAL WINDOWS PROFILE OF THE RDP USER
+          # ============================================================
+
+          $rdpUser = Get-LocalUser -Name "RDP" -ErrorAction Stop
+          $rdpSid = $rdpUser.SID.Value
+
+          Write-Host "RDP SID: $rdpSid"
+
+          $profileRegPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$rdpSid"
+
+          # The profile may not exist yet because the user hasn't logged in.
+          if (-not (Test-Path $profileRegPath)) {
+              Write-Host "RDP profile registry entry does not exist yet."
+              Write-Host "Creating the profile by starting a process as RDP..."
+
+              # Use the same password created above
+              $password = "mkas.1234$"
+              $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+              $credential = New-Object System.Management.Automation.PSCredential(
+                  "RDP",
+                  $securePassword
+              )
+
+              # Start a harmless process as RDP.
+              # This causes Windows to initialize the user's profile.
+              $profileProcess = Start-Process `
+                  -FilePath "cmd.exe" `
+                  -ArgumentList "/c", "exit" `
+                  -Credential $credential `
+                  -LoadUserProfile `
+                  -Wait `
+                  -PassThru
+
+              Start-Sleep -Seconds 2
+          }
+
+          # ============================================================
+          # READ THE REAL PROFILE PATH FROM WINDOWS
+          # ============================================================
+
+          if (-not (Test-Path $profileRegPath)) {
+              throw "Could not find Windows profile registry entry for RDP user ($rdpSid)."
+          }
+
+          $profilePath = (Get-ItemProperty `
+              -Path $profileRegPath `
+              -Name "ProfileImagePath"
+          ).ProfileImagePath
+
+          # Expand environment variables if Windows stored any
+          $profilePath = [Environment]::ExpandEnvironmentVariables($profilePath)
+
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "ACTUAL RDP PROFILE:"
+          Write-Host $profilePath
+          Write-Host "======================================"
+
+          # ============================================================
+          # CONFIGURE GIT IN THE ACTUAL RDP PROFILE
+          # ============================================================
+
+          $gitConfig = Join-Path $profilePath ".gitconfig"
+
+          Write-Host ""
+          Write-Host "Git config path:"
+          Write-Host $gitConfig
+
+          if ([string]::IsNullOrWhiteSpace($env:GIT_NAME)) {
+              throw "GIT_NAME secret is empty."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:GIT_EMAIL)) {
+              throw "GIT_EMAIL secret is empty."
+          }
+
+          # Make sure profile exists
+          if (-not (Test-Path $profilePath)) {
+              New-Item -ItemType Directory -Path $profilePath -Force | Out-Null
+          }
+
+          # Configure Git DIRECTLY in the actual RDP user's profile
+          git config --file "$gitConfig" user.name "$env:GIT_NAME"
+          git config --file "$gitConfig" user.email "$env:GIT_EMAIL"
+
+          # ============================================================
+          # VERIFY
+          # ============================================================
+
+          Write-Host ""
+          Write-Host "=== RDP .gitconfig ==="
+
+          if (-not (Test-Path $gitConfig)) {
+              throw "Git config was not created: $gitConfig"
+          }
+
+          Get-Content "$gitConfig"
+
+          Write-Host ""
+          Write-Host "=== Git identity from RDP config ==="
+
+          Write-Host "Name:"
+          git config --file "$gitConfig" user.name
+
+          Write-Host "Email:"
+          git config --file "$gitConfig" user.email
+
+          Write-Host ""
+          Write-Host "Git configuration successfully installed for RDP user."
+
+          # ============================================================
+          # CONTINUE WITH YOUR EXISTING RDP CODE
+          # ============================================================
+
+          $rdpProfile = $profilePath
           $startupPath = "$rdpProfile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
 
           if (-not (Test-Path $startupPath)) {
