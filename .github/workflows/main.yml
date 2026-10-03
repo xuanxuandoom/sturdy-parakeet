@@ -127,6 +127,43 @@ jobs:
 
           Write-Host "WezTerm installed:"
           & $wezterm.Source --version
+
+      - name: Configure WezTerm
+        shell: powershell
+        run: |
+          $configDir = "C:\ProgramData\WezTerm"
+          $configPath = "$configDir\wezterm.lua"
+
+          New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+
+          $configLines = @(
+              "local wezterm = require 'wezterm'"
+              ""
+              "local config = wezterm.config_builder()"
+              ""
+              'config.front_end = "WebGpu"'
+              'config.webgpu_force_fallback_adapter = true'
+              ""
+              "return config"
+          )
+
+          Set-Content `
+            -Path $configPath `
+            -Value $configLines `
+            -Encoding UTF8
+
+          [Environment]::SetEnvironmentVariable(
+              "WEZTERM_CONFIG_FILE",
+              $configPath,
+              "Machine"
+          )
+
+          $env:WEZTERM_CONFIG_FILE = $configPath
+
+          Write-Host "WezTerm config: $configPath"
+          Write-Host "WEZTERM_CONFIG_FILE: $env:WEZTERM_CONFIG_FILE"
+
+          Get-Content $configPath
           
       - name: Configure Git Identity
         shell: powershell
