@@ -195,70 +195,139 @@ jobs:
           $env:Path = `
             [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
             [Environment]::GetEnvironmentVariable("Path", "User")
-
+            
       - name: Install Codex CLI
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $codexInstallDir = "C:\ProgramData\OpenAI\Codex\bin"
+          Write-Host "=== Installing Codex CLI ==="
 
-          New-Item `
-            -ItemType Directory `
-            -Path $codexInstallDir `
-            -Force | Out-Null
+          # Determine the exact current Codex version.
+          $codexVersion = npm view @openai/codex version
 
-          Write-Host "Installing Codex to:"
-          Write-Host $codexInstallDir
-
-          $env:CODEX_INSTALL_DIR = $codexInstallDir
-          $env:CODEX_NON_INTERACTIVE = "1"
-
-          powershell.exe `
-            -NoProfile `
-            -ExecutionPolicy Bypass `
-            -Command "irm https://chatgpt.com/codex/install.ps1 | iex"
-
-          # Make it available immediately in this GitHub Actions process.
-          $env:Path = "$codexInstallDir;$env:Path"
-
-          # Persist it for subsequent GitHub Actions steps.
-          Add-Content `
-            -Path $env:GITHUB_PATH `
-            -Value $codexInstallDir
-
-          Write-Host "`n=== Codex installation ==="
-
-          if (-not (Test-Path "$codexInstallDir\codex.exe")) {
-              Write-Host "Contents of installation directory:"
-              Get-ChildItem $codexInstallDir -Force -ErrorAction SilentlyContinue
-
-              throw "codex.exe was not installed to $codexInstallDir"
+          if (-not $codexVersion) {
+              throw "Could not determine latest Codex version."
           }
 
-          Write-Host "Codex executable:"
-          Write-Host "$codexInstallDir\codex.exe"
+          Write-Host "Codex version: $codexVersion"
+
+          # Install the main package.
+          npm install -g "@openai/codex@$codexVersion"
+
+          # Explicitly install the Windows x64 native package.
+          npm install -g `
+            "@openai/codex-win32-x64@npm:@openai/codex@$codexVersion-win32-x64"
+
+          # Find npm's global binary directory.
+          $npmBin = npm prefix -g
+          $npmBin = Join-Path $npmBin ""
+
+          Write-Host "npm global prefix: $npmBin"
+
+          # npm normally puts Windows command shims here.
+          $npmGlobalBin = npm bin -g 2>$null
+
+          if (-not $npmGlobalBin) {
+              $npmGlobalBin = $npmBin
+          }
+
+          Write-Host "npm global bin: $npmGlobalBin"
+
+          # Add npm's global location to this job's PATH.
+          $env:Path = "$npmGlobalBin;$env:Path"
+
+          # Also persist it for later GitHub Actions steps.
+          Add-Content `
+            -Path $env:GITHUB_PATH `
+            -Value $npmGlobalBin
+
+          Write-Host "`n=== Searching for Codex ==="
+
+          $codexCommand = Get-Command codex.cmd -ErrorAction SilentlyContinue
+
+          if (-not $codexCommand) {
+              $codexCommand = Get-Command codex.exe -ErrorAction SilentlyContinue
+          }
+
+          if (-not $codexCommand) {
+              $codexCommand = Get-Command codex -ErrorAction SilentlyContinue
+          }
+
+          if (-not $codexCommand) {
+              Write-Host "PATH:"
+              $env:Path -split ";" | ForEach-Object {
+                  Write-Host "  $_"
+              }
+
+              Write-Host "`nSearching npm directories:"
+              Get-ChildItem `
+                -Path $env:APPDATA `
+                -Filter "codex*" `
+                -Recurse `
+                -ErrorAction SilentlyContinue |
+                Select-Object -First 20 FullName
+
+              throw "Codex command was not found after installation."
+          }
+
+          Write-Host "Codex found:"
+          Write-Host $codexCommand.Source
 
           Write-Host "`n=== Codex version ==="
-          & "$codexInstallDir\codex.exe" --version
-
-          Write-Host "`n=== PATH verification ==="
-          where.exe codex
-
-          Write-Host "`nCodex installation successful."
+          & $codexCommand.Source --version
           
-      - name: Configure Git Identity
+      - name: Configure Git For All User Profiles
         shell: powershell
         env:
           GIT_NAME: ${{ secrets.GIT_NAME }}
           GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
         run: |
-          git config --global user.name "$env:GIT_NAME"
-          git config --global user.email "$env:GIT_EMAIL"
+          $ErrorActionPreference = "Stop"
 
-          Write-Host "Git identity configured:"
-          git config --global user.name
-          git config --global user.email
+          $gitName = $env:GIT_NAME
+          $gitEmail = $env:GIT_EMAIL
+
+          Write-Host "Git name: $gitName"
+          Write-Host "Git email: $gitEmail"
+
+          $profiles = Get-ChildItem "C:\Users" -Directory -Force | Where-Object {
+              $_.Name -notin @(
+                  "Public",
+                  "Default",
+                  "Default User",
+                  "All Users"
+              )
+          }
+
+          foreach ($profile in $profiles) {
+              Write-Host "`nConfiguring Git for: $($profile.FullName)"
+
+              $gitConfig = Join-Path $profile.FullName ".gitconfig"
+
+              @(
+                  "[user]"
+                  "    name = $gitName"
+                  "    email = $gitEmail"
+              ) | Set-Content -Path $gitConfig -Encoding UTF8
+
+              Write-Host "Created: $gitConfig"
+          }
+
+          # Configure the current runner account as well.
+          git config --global user.name "$gitName"
+          git config --global user.email "$gitEmail"
+
+          Write-Host "`n=== Git profile configurations ==="
+
+          Get-ChildItem "C:\Users" -Directory -Force |
+              ForEach-Object {
+                  $gitConfig = Join-Path $_.FullName ".gitconfig"
+
+                  if (Test-Path $gitConfig) {
+                      Write-Host "FOUND: $gitConfig"
+                  }
+              }
 
       - name: Verify RDP Accessibility
         run: |
