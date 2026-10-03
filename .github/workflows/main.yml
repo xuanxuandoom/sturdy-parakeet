@@ -165,7 +165,7 @@ jobs:
 
           Get-Content $configPath
 
-      - name: Install OpenCode and Codex
+      - name: Install OpenCode
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -191,34 +191,61 @@ jobs:
           Write-Host "OpenCode: $($opencode.Source)"
           & $opencode.Source --version
 
-          Write-Host "`n=== Installing Codex CLI ==="
-
-          # Use OpenAI's official Windows installer.
-          powershell -ExecutionPolicy Bypass -Command `
-            "irm https://chatgpt.com/codex/install.ps1 | iex"
-
           # Refresh PATH after the installer.
           $env:Path = `
             [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
             [Environment]::GetEnvironmentVariable("Path", "User")
 
-          Write-Host "`n=== Verifying Codex ==="
+      - name: Install Codex CLI
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
 
-          $codex = Get-Command codex.exe -ErrorAction SilentlyContinue
+          $codexInstallDir = "C:\ProgramData\OpenAI\Codex\bin"
 
-          if (-not $codex) {
-              $codex = Get-Command codex -ErrorAction SilentlyContinue
+          New-Item `
+            -ItemType Directory `
+            -Path $codexInstallDir `
+            -Force | Out-Null
+
+          Write-Host "Installing Codex to:"
+          Write-Host $codexInstallDir
+
+          $env:CODEX_INSTALL_DIR = $codexInstallDir
+          $env:CODEX_NON_INTERACTIVE = "1"
+
+          powershell.exe `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -Command "irm https://chatgpt.com/codex/install.ps1 | iex"
+
+          # Make it available immediately in this GitHub Actions process.
+          $env:Path = "$codexInstallDir;$env:Path"
+
+          # Persist it for subsequent GitHub Actions steps.
+          Add-Content `
+            -Path $env:GITHUB_PATH `
+            -Value $codexInstallDir
+
+          Write-Host "`n=== Codex installation ==="
+
+          if (-not (Test-Path "$codexInstallDir\codex.exe")) {
+              Write-Host "Contents of installation directory:"
+              Get-ChildItem $codexInstallDir -Force -ErrorAction SilentlyContinue
+
+              throw "codex.exe was not installed to $codexInstallDir"
           }
 
-          if (-not $codex) {
-              throw "Codex installation failed: codex command not found."
-          }
+          Write-Host "Codex executable:"
+          Write-Host "$codexInstallDir\codex.exe"
 
-          Write-Host "Codex: $($codex.Source)"
-          & $codex.Source --version
+          Write-Host "`n=== Codex version ==="
+          & "$codexInstallDir\codex.exe" --version
 
-          Write-Host "`n=== AI CLI installation complete ==="
+          Write-Host "`n=== PATH verification ==="
+          where.exe codex
 
+          Write-Host "`nCodex installation successful."
           
       - name: Configure Git Identity
         shell: powershell
