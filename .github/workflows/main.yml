@@ -75,67 +75,38 @@ jobs:
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Verify Rust MSVC toolchain
+      - name: Verify Development Tools
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=== Rust ==="
+          rustc --version
+          cargo --version
           rustup show
-          rustup target list --installed
-          rustc -vV
-      
-          Write-Host "`nSearching for MSVC linker..."
-          Get-ChildItem `
-            "C:\Program Files\Microsoft Visual Studio" `
+
+          Write-Host "`n=== Git ==="
+          git --version
+
+          Write-Host "`n=== GitHub CLI ==="
+          gh --version
+
+          Write-Host "`n=== MSVC ==="
+          $msvcLink = Get-ChildItem `
+            "C:\Program Files\Microsoft Visual Studio\2022" `
             -Filter "link.exe" `
             -Recurse `
             -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty FullName
+            Where-Object { $_.FullName -match "\\Hostx64\\x64\\link\.exe$" } |
+            Select-Object -First 1
 
-          
-      - name: Install Rust, Build Tools, GitHub CLI
-        shell: powershell
-        run: |
-          # Install WinGet (App Installer) if not already available
-          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing WinGet..."
-              $progressPreference = 'silentlyContinue'
-              Invoke-WebRequest `
-                -Uri "https://aka.ms/getwinget" `
-                -OutFile "$env:TEMP\winget.msixbundle"
-              Add-AppxPackage "$env:TEMP\winget.msixbundle"
+          if (-not $msvcLink) {
+              throw "MSVC x64 linker not found"
           }
 
-          # Refresh PATH
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
-                      [System.Environment]::GetEnvironmentVariable("Path", "User")
+          Write-Host "MSVC linker: $($msvcLink.FullName)"
 
-          winget --version
-
-          # Rust toolchain + MSVC build dependencies
-          winget install --id Rustlang.Rustup `
-            --exact --silent --accept-package-agreements --accept-source-agreements
-
-          winget install --id Microsoft.VisualStudio.2022.BuildTools `
-            --exact --silent --accept-package-agreements --accept-source-agreements `
-            --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-
-          # GitHub CLI
-          winget install --id GitHub.cli `
-            --exact --silent --accept-package-agreements --accept-source-agreements
-
-          # Refresh PATH again
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
-                      [System.Environment]::GetEnvironmentVariable("Path", "User")
-
-          # Configure Rust
-          rustup default stable
-          rustup toolchain install stable
-          rustup component add rustfmt clippy
-
-          # Verify
-          rustc --version
-          cargo --version
-          rustup --version
-          gh --version
+          Write-Host "`n=== Environment ready ==="
           
       - name: Configure Git Identity
         shell: powershell
