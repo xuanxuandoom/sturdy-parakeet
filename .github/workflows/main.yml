@@ -127,59 +127,6 @@ jobs:
 
           Write-Host "WezTerm installed:"
           & $wezterm.Source --version
-
-      - name: Add WezTerm Explorer Context Menu
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $wezterm = (Get-Command wezterm-gui.exe -ErrorAction SilentlyContinue).Source
-
-          if (-not $wezterm) {
-              $wezterm = "C:\Program Files\WezTerm\wezterm-gui.exe"
-          }
-
-          if (-not (Test-Path $wezterm)) {
-              throw "Could not find wezterm-gui.exe"
-          }
-
-          Write-Host "WezTerm: $wezterm"
-
-          # Right-click a folder itself
-          $folderKey = "HKLM:\SOFTWARE\Classes\Directory\shell\WezTerm"
-
-          New-Item -Path $folderKey -Force | Out-Null
-          Set-ItemProperty -Path $folderKey `
-            -Name "(Default)" `
-            -Value "Open in WezTerm"
-
-          Set-ItemProperty -Path $folderKey `
-            -Name "Icon" `
-            -Value "`"$wezterm`""
-
-          New-Item -Path "$folderKey\command" -Force | Out-Null
-          Set-ItemProperty -Path "$folderKey\command" `
-            -Name "(Default)" `
-            -Value "`"$wezterm`" start --cwd `"%V`""
-
-          # Right-click the background inside a folder
-          $backgroundKey = "HKLM:\SOFTWARE\Classes\Directory\Background\shell\WezTerm"
-
-          New-Item -Path $backgroundKey -Force | Out-Null
-          Set-ItemProperty -Path $backgroundKey `
-            -Name "(Default)" `
-            -Value "Open WezTerm Here"
-
-          Set-ItemProperty -Path $backgroundKey `
-            -Name "Icon" `
-            -Value "`"$wezterm`""
-
-          New-Item -Path "$backgroundKey\command" -Force | Out-Null
-          Set-ItemProperty -Path "$backgroundKey\command" `
-            -Name "(Default)" `
-            -Value "`"$wezterm`" start --cwd `"%V`""
-
-          Write-Host "WezTerm Explorer context menu installed."
           
       - name: Configure Git Identity
         shell: powershell
@@ -220,25 +167,56 @@ jobs:
           $downloadPath = "$startupPath\Downloads.bat"
 
           while ($true) {
-              if (Test-Path $rdpProfile) {
-                  try {
-                      if (-not (Test-Path $startupPath)) {
-                          New-Item -ItemType Directory -Path $startupPath -Force | Out-Null
-                      }
+            if (Test-Path $rdpProfile) {
+                try {
+                    if (-not (Test-Path $startupPath)) {
+                        New-Item -ItemType Directory -Path $startupPath -Force | Out-Null
+                    }
+            
+                    # Configure WezTerm for the RDP user's desktop session.
+                    # OpenGL fails in this RDP environment, while WebGPU with
+                    # the fallback adapter works.
+                    $weztermConfig = @'
+            local wezterm = require 'wezterm'
+            
+            local config = wezterm.config_builder()
+            
+            config.front_end = "WebGpu"
+            config.webgpu_force_fallback_adapter = true
+            
+            return config
+            '@
+            
+                    $weztermConfigPath = "$rdpProfile\.wezterm.lua"
+            
+                    Set-Content `
+                        -Path $weztermConfigPath `
+                        -Value $weztermConfig `
+                        -Encoding UTF8 `
+                        -Force
+            
+                    Write-Host "✅ WezTerm configuration written to $weztermConfigPath"
+                    Get-Content $weztermConfigPath
+            
+                    Invoke-WebRequest `
+                        -Uri $downloadUrl `
+                        -OutFile $downloadPath `
+                        -UseBasicParsing
+            
+                    Write-Host "✅ Downloads.bat copied to $downloadPath"
+            
+                    # Run the batch file for the first time
+                    cmd /c $downloadPath
+            
+                    Write-Host "✅ Downloads.bat executed successfully"
+                    break
+                }
+                catch {
+                    Write-Host "❌ Error: $($_.Exception.Message)"
+                    break
+                }
+            }
 
-                      Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
-                      Write-Host "✅ Downloads.bat copied to $downloadPath"
-
-                      # Run the batch file for the first time
-                      cmd /c $downloadPath
-                      Write-Host "✅ Downloads.bat executed successfully"
-                      break
-                  }
-                  catch {
-                      Write-Host "❌ Error copying or executing Downloads.bat: $($_.Exception.Message)"
-                      break
-                  }
-              }
               else {
                   Write-Host "[$(Get-Date)] Waiting for RDP profile to be created..."
                   Start-Sleep -Seconds 30
