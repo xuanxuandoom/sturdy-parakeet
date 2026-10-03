@@ -113,49 +113,44 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Check whether Windows Terminal is already installed
-          $terminal = Get-AppxPackage -Name Microsoft.WindowsTerminal -ErrorAction SilentlyContinue
+          # Get the latest stable Windows Terminal release
+          $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/microsoft/terminal/releases/latest"
 
-          if (-not $terminal) {
-              Write-Host "Installing Windows Terminal..."
+          $asset = $release.assets |
+            Where-Object {
+              $_.name -match '^Microsoft\.WindowsTerminal_.*\.msixbundle$'
+            } |
+            Select-Object -First 1
 
-              # Download the current MSIX bundle from Microsoft's GitHub release
-              $release = Invoke-RestMethod `
-                -Uri "https://api.github.com/repos/microsoft/terminal/releases/latest"
-
-              $asset = $release.assets |
-                Where-Object {
-                  $_.name -like "*Microsoft.WindowsTerminal_*x64.msixbundle"
-                } |
-                Select-Object -First 1
-
-              if (-not $asset) {
-                  throw "Could not find Windows Terminal x64 MSIX bundle."
-              }
-
-              $installer = Join-Path $env:TEMP $asset.name
-
-              Invoke-WebRequest `
-                -Uri $asset.browser_download_url `
-                -OutFile $installer
-
-              Add-AppxPackage -Path $installer
-
-              Remove-Item $installer -Force
-          }
-          else {
-              Write-Host "Windows Terminal is already installed."
+          if (-not $asset) {
+              Write-Host "Available release assets:"
+              $release.assets | Select-Object -ExpandProperty name
+              throw "Windows Terminal MSIX bundle not found."
           }
 
-          # Verify
+          Write-Host "Downloading: $($asset.name)"
+
+          $installer = Join-Path $env:TEMP $asset.name
+
+          Invoke-WebRequest `
+            -Uri $asset.browser_download_url `
+            -OutFile $installer
+
+          Write-Host "Installing Windows Terminal..."
+
+          Add-AppxPackage -Path $installer
+
+          Remove-Item $installer -Force
+
+          # Verify installation
           $terminal = Get-AppxPackage -Name Microsoft.WindowsTerminal
 
           if (-not $terminal) {
               throw "Windows Terminal installation failed."
           }
 
-          Write-Host "Windows Terminal installed:"
-          $terminal | Select-Object Name, Version, PackageFullName
+          Write-Host "Windows Terminal $($terminal.Version) installed."
           
       - name: Configure Git Identity
         shell: powershell
