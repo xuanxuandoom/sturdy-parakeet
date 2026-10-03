@@ -75,6 +75,16 @@ jobs:
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
+      - name: Check existing Windows build tools
+        shell: powershell
+        run: |
+          rustc --version
+          cargo --version
+          git --version
+          gh --version
+          where.exe cl.exe
+          where.exe link.exe
+          
       - name: Install Rust, Build Tools, GitHub CLI
         shell: powershell
         run: |
