@@ -75,15 +75,21 @@ jobs:
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Check existing Windows build tools
+      - name: Verify Rust MSVC toolchain
         shell: powershell
         run: |
-          rustc --version
-          cargo --version
-          git --version
-          gh --version
-          where.exe cl.exe
-          where.exe link.exe
+          rustup show
+          rustup target list --installed
+          rustc -vV
+      
+          Write-Host "`nSearching for MSVC linker..."
+          Get-ChildItem `
+            "C:\Program Files\Microsoft Visual Studio" `
+            -Filter "link.exe" `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+
           
       - name: Install Rust, Build Tools, GitHub CLI
         shell: powershell
