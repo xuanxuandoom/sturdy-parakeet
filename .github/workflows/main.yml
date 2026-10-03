@@ -75,39 +75,6 @@ jobs:
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Verify Development Tools
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "=== Rust ==="
-          rustc --version
-          cargo --version
-          rustup show
-
-          Write-Host "`n=== Git ==="
-          git --version
-
-          Write-Host "`n=== GitHub CLI ==="
-          gh --version
-
-          Write-Host "`n=== MSVC ==="
-          $msvcLink = Get-ChildItem `
-            "C:\Program Files\Microsoft Visual Studio\2022" `
-            -Filter "link.exe" `
-            -Recurse `
-            -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "\\Hostx64\\x64\\link\.exe$" } |
-            Select-Object -First 1
-
-          if (-not $msvcLink) {
-              throw "MSVC x64 linker not found"
-          }
-
-          Write-Host "MSVC linker: $($msvcLink.FullName)"
-
-          Write-Host "`n=== Environment ready ==="
-
       - name: Install WezTerm
         shell: powershell
         run: |
